@@ -1,0 +1,3 @@
+url: "https://yoururl.atlassian.net"         # the url to your confluence cloud instance
+user: "user@domain.com"                      # the email you login with
+api_token: "hunter2"                         # the api token of your user
