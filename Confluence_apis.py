@@ -23,6 +23,68 @@ class Confluence_server_api:
                           }
 
 
+
+
+
+
+    def get(self, url, params=None, data=None, paginate=True):
+        """
+        Wrapper function to make API calls that will keep sending subsequent requests if the answer is paginated.
+        """
+
+
+        logging.debug(f"Fetching URL: {url}")
+
+        # fetch results
+        response = requests.request("GET", url, headers=self.headers, params=params, data=data, auth=self.auth,).json()
+
+        # check if confluence limited the number of hits, seems to do that if you ask for expansions, setting it to 50
+        #pdb.set_trace()
+        if response['limit'] != params.get('limit', response['limit']) and paginate:
+
+            logging.debug(f"API pagination detected, continuing sending more requests.")
+
+            # save inital response
+            results = response['results']
+
+            # loop until all hits are collected
+            i = 1
+            while response['results'] and len(results) <= limit:
+
+
+                logging.debug(f"Fetching URL: {url} starting from {i * response['limit']}")
+
+                # set new start point for query
+                params['start'] = i * response['limit']
+
+                # ask for a new batch of results
+                response = requests.request("GET",
+                                            url,
+                                            headers=self.headers,
+                                            params=params,
+                                            data=data,
+                                            auth=self.auth,
+                                            ).json()
+
+                # save the new batch together with the previous ones
+                results += response['results']
+
+                # increase counter
+                i+=1
+            
+            logging.debug("API pagination finished.")
+
+        else:
+            # got them all in the first request
+            results = response['results']
+
+        # return at most the limit the user asked for, if any
+        return results[:params.get('limit')]
+
+
+
+
+
     def get_spaces(self, limit=1000, expand=None):
         """
         Returns a list of spaces, limited in number by {limit}. Expands properties listed comma-separated in {expand}.
@@ -88,6 +150,80 @@ class Confluence_server_api:
 
 
 
+
+
+    def get_groups(self):
+        """
+        Returns a list of all groups.
+        """
+
+        # get all groups
+        url = f"{self.baseurl}/rest/api/group"
+        params = {
+                    'limit':1000,
+                 }
+        return self.get(url, params=params)
+
+
+
+
+
+    def get_group_members(self, group_name):
+        """
+        Returns a list of all users who are members of a group.
+        """
+
+        # get all group members
+        url = f"{self.baseurl}/rest/api/group/{group_name}/member"
+        params = {
+                    'limit':1000,
+                 }
+        return self.get(url, params=params)
+
+
+
+
+
+    def get_users(self):
+        """
+        Returns a list of most users. Will miss disabled accounts that are not members of any groups.
+        """
+
+
+        ### group based method, won't return users not in any groups, and will have duplicates of users in multiple groups
+
+        # get all groups
+        groups = self.get_groups()
+
+        # get members of each group
+        group_users = []
+        for group in groups:
+            group_users += self.get_group_members(group['name'])
+
+        ### CQL method, won't return disabled accounts
+        search_users = [ user['user'] for user in self.search(cql_query='type=user')]
+
+        # merge lists and remove duplicates based on username
+        merged_users = { user['username']:user for user in group_users}
+        merged_users.update({ user['username']:user for user in search_users})
+
+        # return as a list of users
+        return [ user for user in merged_users.values() ]
+
+
+
+
+    def search(self, cql_query):
+        """
+        Returns the result of a CQL query (https://developer.atlassian.com/server/confluence/advanced-searching-using-cql/).
+        """
+
+        url = f"{self.baseurl}/rest/api/search"
+        params = {
+                    'cql':cql_query,
+                    'limit':1000,
+                 }
+        return self.get(url, params=params)
 
 
 
