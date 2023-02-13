@@ -366,7 +366,7 @@ class Confluence_cloud_api:
         return self.get(f"{self.baseurl}/wiki/rest/api/group/{group_id}/membersByGroupId", limit=limit, expand=expand, paginate=paginate)
 
 
-    def convert_to_guest_user(self, user_id, guest_group_id):
+    def convert_to_guest_user(self, user_id, guest_group_id, remove_other_groups=False):
         """
         Coverts a user, identified by {user_id}, to a guest user by adding them to the guest group, identified by {guest_group_id}.
         Will handle removing other groups if need be.
@@ -376,16 +376,18 @@ class Confluence_cloud_api:
         user_group_memberships = self.get_user_group_memberships(user_id)
 
         # check if the user already is a guest user
-        if len(user_group_memberships) == 1 and user_group_memberships[0]['id'] == guest_group_id:
+        if guest_group_id in [ group['id'] for group in user_group_memberships ]:
+            logging.debug(f'Skipping converting users {user_id} to guest since they already are a guest.')
+
+            # skip in that case
             return
 
+        # check if all other groups should be removed
+        if remove_user_from_group:
+            # remove user from all current groups
+            for group in user_group_memberships:
+                self.remove_user_from_group(user_id, group['id'])
 
-        # remove user from all current groups
-        for group in user_group_memberships:
-            self.remove_user_from_group(user_id, group['id'])
-
-        # remove the user from all current groups
-        
 
         #pdb.set_trace()
         # add user to the guest group

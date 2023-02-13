@@ -18,7 +18,7 @@ logging.basicConfig(
 
 
 # user help message
-usage = f"Usage: python3 {sys.argv[0]} <atlassian config yaml file>"
+usage = f"Usage: python3 {sys.argv[0]} <atlassian config yaml file> [<groups to convert, comma separated>]"
 
 # get the arguments
 try:
@@ -28,6 +28,11 @@ except IndexError:
     print(f"{usage}\n\nERROR: Atlassian config file argument missing")
     sys.exit()
 
+try:
+    logging.debug("Fetching group filter list")
+    group_filter_list = sys.argv[2].split(',')
+except IndexError:
+    group_filter_list = []
 
 # read the atlassian config file
 logging.debug("Reading config file.")
@@ -171,6 +176,19 @@ for user_id,up in user_permissions.items():
 
         # count number of 1 space users
         c += 1
+
+        # get user's group memberships
+        user_group_memberships = confluence.get_user_group_memberships(user_id)
+        user_group_memberships_names = [group['name'] for group in user_group_memberships]
+        pdb.set_trace()
+
+        # if the users should be filtered on group memberships
+        if group_filter_list:
+
+            # only convert users who are members of any of the specified group(s)
+            if not any(group_name in group_filter_list for group_name in user_group_memberships_names):
+                # skip user if they are not in the correct group(s)
+                continue
 
         # convert user to guest user
         logging.info(f"Converting {user_permissions[user_id]['user']['displayName']} to guest user with access to {key_to_name[list(user_permissions[user_id]['spaces'].keys())[0]]}")
