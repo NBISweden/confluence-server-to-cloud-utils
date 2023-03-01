@@ -39,7 +39,7 @@ try:
 except IndexError:
     print(f"WARNING: Space name filter missing, removing label from all spaces in Confluence instance.")
     name_filter = None
-    time.sleep(3)
+    #time.sleep(3)
 
 
 # read the atlassian config file
