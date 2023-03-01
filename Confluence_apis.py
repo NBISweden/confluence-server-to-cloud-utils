@@ -447,11 +447,38 @@ class Confluence_cloud_api:
 
 
 
+    def add_label_to_space(self, space_key, label, prefix='team'):
+        """
+        Adds the label {label} to a space, indentified by {space_key}, using the prefix {prefix}.
+        """
+        # define url and payload
+        url     = f"{self.baseurl}/wiki/rest/api/space/{space_key}/label"
+        payload = json.dumps([{
+                                'prefix' : prefix,
+                                'name'   : label,
+                             }])
+        query = {}
+
+#        pdb.set_trace()
+        return self.post(url, params=query, data=payload)
 
 
 
 
 
+    def remove_label_from_space(self, space_key, label, prefix='team'):
+        """
+        Removes the label {label} from a space, indentified by {space_key}.
+        """
+        # define url and payload
+        url     = f"{self.baseurl}/wiki/rest/api/space/{space_key}/label"
+        query = {
+                    'prefix' : prefix,
+                    'name'   : label,
+                }
+
+#        pdb.set_trace()
+        return self.delete(url, params=query)
 
 
 
