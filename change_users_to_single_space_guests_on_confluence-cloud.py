@@ -178,9 +178,13 @@ for user_id,up in user_permissions.items():
         c += 1
 
         # get user's group memberships
-        user_group_memberships = confluence.get_user_group_memberships(user_id)
-        user_group_memberships_names = [group['name'] for group in user_group_memberships]
-        pdb.set_trace()
+        #user_group_memberships = confluence.get_user_group_memberships(user_id)
+        #user_group_memberships_names = [group['name'] for group in user_group_memberships]
+        
+        # debug
+        user_group_memberships_names = []
+        #pdb.set_trace()
+
 
         # if the users should be filtered on group memberships
         if group_filter_list:
@@ -190,9 +194,16 @@ for user_id,up in user_permissions.items():
                 # skip user if they are not in the correct group(s)
                 continue
 
+        # get the name of the space a user has access to
+        guest_space_name = "no space at all"
+        if len(user_permissions[user_id]['spaces']) > 0:
+            guest_space_name = key_to_name[list(user_permissions[user_id]['spaces'].keys())[0]]
+
+        logging.info(f"Converting {user_permissions[user_id]['user']['displayName']} to guest user with access to {guest_space_name}")
+
         # convert user to guest user
-        logging.info(f"Converting {user_permissions[user_id]['user']['displayName']} to guest user with access to {key_to_name[list(user_permissions[user_id]['spaces'].keys())[0]]}")
-        confluence.convert_to_guest_user(user_id, guest_group_id)
+        #confluence.convert_to_guest_user(user_id, guest_group_id)
+
 
 
 logging.info(f"Finished converting {c} users to guest users, out of {len(user_permissions)} total users.")

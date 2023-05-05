@@ -45,7 +45,7 @@ spaces = [ space for space in spaces if space['key'] == 'DAH' ]
 # rename all spaces in list
 for i,space in enumerate(spaces):
     print(f"Renaming {i+1}/{len(spaces)}:\t{space['name']} -> {prefix}{space['name']}")
-    confluence.update_space_name(space['key'], f"{prefix}{space['name']}")
-    pdb.set_trace()
+    response = confluence.update_space_name(space['key'], f"{prefix}{space['name']}")
+    #pdb.set_trace()
 
 print("Done")
