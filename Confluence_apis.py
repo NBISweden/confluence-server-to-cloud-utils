@@ -53,7 +53,7 @@ class Confluence_server_api:
 
         # keep asking for more until there is no more or the limit is reached
         #pdb.set_trace()
-        if response['size'] <= params.get('limit', 10000) and paginate:
+        if 'size' in response.keys() and response['size'] <= params.get('limit', 10000) and paginate:
 
             logging.debug(f"Possible API pagination detected, continuing sending more requests.")
 
@@ -87,9 +87,13 @@ class Confluence_server_api:
             
             logging.debug(f"API pagination finished, {i} pages fetched.")
 
-        else:
+        elif 'results' in response.keys():
             # got them all in the first request
             results = response['results']
+
+        # other type of response, return it all
+        else:
+            return response
 
         # return at most the limit the user asked for, if any
         return results[:params.get('limit', 10000)]
@@ -199,11 +203,11 @@ class Confluence_server_api:
 
     def get_users(self):
         """
-        Returns a list of most users. Will miss disabled accounts that are not members of any groups.
+        Returns a list of all users.
         """
 
 
-        ### group based method, won't return users not in any groups, and will have duplicates of users in multiple groups
+        ### group based method
 
         # get all groups
         groups = self.get_groups()
@@ -212,6 +216,7 @@ class Confluence_server_api:
         group_users = []
         for group in groups:
             group_users += self.get_group_members(group['name'])
+
 
         ### CQL method, won't return disabled accounts
         search_users = [ user['user'] for user in self.search(cql_query='type=user')]
@@ -222,6 +227,22 @@ class Confluence_server_api:
 
         # return as a list of users
         return [ user for user in merged_users.values() ]
+
+
+
+
+    def get_user_info(self, username):
+        """
+        Returns more info about a username.
+        """
+
+        # get user info
+        url = f"{self.baseurl}/rest/api/user?username={username}"
+        url = f"{self.baseurl}/rest/mobile/1.0/profile/{username}"
+        params = {
+                    'limit':1000,
+                 }
+        return self.get(url, params=params)
 
 
 
@@ -237,6 +258,193 @@ class Confluence_server_api:
                     'limit':1000,
                  }
         return self.get(url, params=params)
+
+
+
+
+
+    def find_possible_guest_users(self, n_spaces=1, ignore_personal_spaces=False, ignore_unlicenced=True, ignore_deleted=True):
+        """
+        Find all users that are members of maximum {n_spaces} spaces.
+        If {ignore_personal_spaces} is True it will not count the personal space (a space with same name as username) to wards this number.
+        Will only check if a user is mentioned in a space's permissions, not what permissions they actually have.
+
+        A huge function since there is no way to ask Confluence about what permissions a user has. You have to reconstruct the permissions
+        by asking all spaces which users and groups have permission to it, and which group members each group has.
+        """
+
+        from thefuzz import fuzz
+    #pdb.set_trace()
+
+        # get a list of all spaces
+        spaces = self.get_spaces(expand="permissions")
+        
+        # init
+        user_permissions = {}
+        group_permissions = {}
+        
+        ## Get all user-space and group-space  memberships
+        # go through all spaces
+        logging.info("Parsing permissions.")
+        for space in spaces:
+
+            pdb.set_trace()
+            
+            logging.debug(f"Space: {space['name']}")
+        
+            # go through all permissions
+            for permission in space['permissions']:
+        
+                # skip empty permissions
+                if 'subjects' not in permission.keys():
+                    continue
+        
+                # if it is a user permission
+                if permission['subjects'].get('user'):
+        
+                    # for all users with permission
+                    for user in permission['subjects']['user']['results']:
+        
+                        # save the user and space info
+                        try:
+                            logging.debug(f"User: {user['accountId']}")
+                            user_permissions[user['accountId']]['spaces'][space['key']] = space
+
+                        except KeyError:
+                            # if it is the first time seeing this user
+                            user_permissions[user['accountId']] = {}
+                            user_permissions[user['accountId']]['spaces'] = {space['key']:space}
+                            user_permissions[user['accountId']]['user'] = user
+        
+                # if it is a group permission
+                elif permission['subjects'].get('group'):
+        
+                    # for all groups with permission
+                    for group in permission['subjects']['group']['results']:
+        
+                        # save the group and space info
+                        try:
+                            logging.debug(f"Group: {group['id']}")
+                            group_permissions[group['id']]['spaces'][space['key']] = space
+                        except KeyError:
+                            # if it is the first time seeing this group
+                            group_permissions[group['id']] = {}
+                            group_permissions[group['id']]['spaces'] = {space['key']:space}
+                            group_permissions[group['id']]['group'] = group
+        
+        logging.debug("Parsing permissions finished.")
+        
+        ## get a complete list of all users
+        logging.info("Fetching all users from API.")
+        users = self.get_users() 
+
+        # add all users to user_permissions dict to make sure all users are present, even those who don't have any stated permissions in spaces
+        for user in users:
+
+            # find missing users
+            if user['user']['accountId'] not in user_permissions:
+
+                # initiate entry
+                logging.debug(f"Missing user: {user}")
+                user_permissions[user['user']['accountId']] = {'spaces':{}, 'user':user['user']}
+
+
+        # get all groups
+        logging.info(f"Fetching groups.")
+        groups = self.get_groups()
+
+        # for each groups, get members
+        for group in groups:
+
+            # fetch group members
+            logging.info(f"Fetching group memebers from {group['name']}")
+            members = self.get_group_members(group_id=group['id'])
+
+            # initiate entry if group is missing in group_permissions
+            if group['id'] not in group_permissions:
+                group_permissions[group['id']] = {'spaces':{}, 'group':group}
+
+            # skip groups with no permissions
+
+            # for each member, add the groups spaces to the users spaces list
+            for member in members:
+
+                # initiate entry if member is missing in member_permissions
+                if member['accountId'] not in user_permissions:
+
+                    # initiate entry
+                    user_permissions[member['accountId']] = {'spaces':{}, 'user':member}
+
+                # add group spaces to user spaces
+                user_permissions[member['accountId']]['spaces'].update(group_permissions[group['id']]['spaces'])
+
+
+
+        # make a lookup table for space keys to space names for easy access
+        key_to_name = { space['key']:space['name'] for space in spaces}
+
+        # init
+        logging.debug(f"Findinig users with {n_spaces} or less spaces.")
+        total_users = 0
+        found_users = 0
+
+        # find users with access to only n_spaces spaces
+        possible_guests = {}
+        for user_id,user_perm in user_permissions.items():
+
+            # filter out unlicensed users
+            if ignore_unlicenced and 'Unlicensed' in user_perm['user']['displayName']:
+                continue
+
+            # filter out deleted users
+            if ignore_deleted and 'Deleted' in user_perm['user']['displayName']:
+                continue
+
+
+            # count user towards total
+            total_users += 1
+
+            # get the name of the space a user has access to
+            user_space_names = None
+            if len(user_permissions[user_id]['spaces']) > 0:
+                user_spaces = user_permissions[user_id]['spaces'].copy()
+
+
+
+            # filter out perosnal spaces if asked to
+            if ignore_personal_spaces:
+
+                # go through the names of all spaces the user is a member of
+                for user_space_key, user_space in user_permissions[user_id]['spaces'].items():
+
+                    # if the space name is too similar, delete it
+                    if fuzz.ratio(name_processor(user_perm['user']['displayName']), name_processor(user_space['name'])) >= 75:
+                        del user_spaces[user_space_key]
+
+
+
+            # check if the user is a member in few enough spaces to be eligible to be selected
+            if len(user_spaces) <= n_spaces:
+
+                # count number of found users
+                found_users += 1
+
+                # print user entry
+                logging.debug(f"{user_perm['user'].get('displayName', None)}\t{user_perm['user'].get('email', None)}\t{','.join(user_spaces.keys())}")
+
+                # save the user in the keep list
+                possible_guests[user_id] = {'user':user_perm['user'], 'spaces':user_perm['spaces']}
+
+
+        logging.debug(f"Found {found_users} users out of {total_users} total users that are members of {n_spaces} or less spaces.")
+        return possible_guests
+
+
+
+
+
+
+
 
 
 
@@ -263,39 +471,41 @@ class Confluence_cloud_api:
 
 
 
-    def get(self, url, params=None, expand=None, limit=10000, paginate=True):
+    def get(self, url, params=None, expand=None, paginate=True):
         """
         Wrapper function to make API calls that will keep sending subsequent requests if the answer is paginated.
         """
 
+        #pdb.set_trace()
+        # init
+        url_parameters = []
+
         # if there is anything to expand
         if expand:
-            expand = f"&expand={expand}"
-        else:
-            expand = ''
+            url_parameters.append(f"expand={expand}")
 
         # if there is a parameter dict
         if params:
-            params_str = ""
             for key,val in params.items():
-                params_str += f"&{str(key)}={str(val)}"
+                url_parameters.append(f"{str(key)}={str(val)}")
+
+        # check if a parameter separator (?) should be inserted in the url
+        if url_parameters:
+            url_parameters = f"?{'&'.join(url_parameters)}"
+            request_url = f"{url}{url_parameters}"
         else:
-            params_str = ''
+            request_url = url
+
 
         # define url and send request
-        request_url = f"{url}?limit={limit}{expand}{params_str}"
         logging.debug(f"Fetching URL: {request_url}")
         
         # fetch results
-        response = requests.request("GET",
-                                    request_url,
-                                    headers=self.headers,
-                                    auth=self.auth,
-                                    ).json()
+        response = requests.request( "GET", request_url, headers=self.headers, auth=self.auth ).json()
 
         # check if confluence limited the number of hits, seems to do that if you ask for expansions, setting it to 50
         #pdb.set_trace()
-        if len(response['results']) < limit and paginate:
+        if response['results'] and paginate:
 
             logging.debug(f"Possible API pagination detected, continuing sending more requests.")
 
@@ -304,13 +514,22 @@ class Confluence_cloud_api:
 
             # loop until all hits are collected
             i = 1
-            while response['results'] and len(results) < limit:
+            while response['results']:
+
+                # check if ? if already in the url
+                last_url_part = request_url.split('/')[-1]
+                if '?' in last_url_part:
+                    # add a & if there already is an url argument there
+                    argument_glue = '&'
+                else:
+                    # add it if it's not there already
+                    argument_glue = '?'
 
 
-                logging.debug(f"Fetching URL: {request_url}&start={ len(results) + 1 }")
+                logging.debug(f"Fetching URL: {request_url}{argument_glue}start={ len(results) + 1 }")
                 # ask for a new batch of results
                 response = requests.request("GET",
-                                            f"{request_url}&start={ len(results) + 1 }", 
+                                            f"{request_url}{argument_glue}start={ len(results) + 1 }", 
                                             headers=self.headers,
                                             auth=self.auth,
                                             ).json()
@@ -327,8 +546,8 @@ class Confluence_cloud_api:
             # got them all in the first request
             results = response['results']
 
-        # return at most the limit the user asked for
-        return results[:limit]
+        # return
+        return results
 
 
     def post(self, url, data=None, params=None):
@@ -355,28 +574,28 @@ class Confluence_cloud_api:
         Returns a list of spaces, limited in number by {limit}. Expands properties listed comma-separated in {expand}.
         """
         # define url and send request
-        return self.get(f"{self.baseurl}/wiki/rest/api/space", limit=limit, expand=expand, paginate=paginate)
+        return self.get(f"{self.baseurl}/wiki/rest/api/space", expand=expand, paginate=paginate)[:limit]
 
 
     def get_users(self, limit=10000, expand=None, paginate=True):
         """
         Returns a list of users, limited in number by {limit}.
         """
-        return self.get(f"{self.baseurl}/wiki/rest/api/search/user", params={"cql":"type=user"}, limit=limit, expand=expand, paginate=paginate)
+        return self.get(f"{self.baseurl}/wiki/rest/api/search/user", params={"cql":"type=user"}, expand=expand, paginate=paginate)[:limit]
 
 
     def get_groups(self, limit=1000, expand=None, paginate=True):
         """
         Returns a list of groups, limited in number by {limit}.
         """
-        return self.get(f"{self.baseurl}/wiki/rest/api/group", limit=limit, expand=expand, paginate=paginate)
+        return self.get(f"{self.baseurl}/wiki/rest/api/group", expand=expand, paginate=paginate)[:limit]
 
 
-    def get_group_members(self, group_id, limit=200, expand=None, paginate=True):
+    def get_group_members(self, group_id, limit=1000, expand=None, paginate=True):
         """
         Returns a list of groups members of group {group_id}, limited in number by {limit}.
         """
-        return self.get(f"{self.baseurl}/wiki/rest/api/group/{group_id}/membersByGroupId", limit=limit, expand=expand, paginate=paginate)
+        return self.get(f"{self.baseurl}/wiki/rest/api/group/{group_id}/membersByGroupId", expand=expand, paginate=paginate)[:limit]
 
 
     def convert_to_guest_user(self, user_id, guest_group_id, remove_other_groups=False):
@@ -511,7 +730,8 @@ class Confluence_cloud_api:
         by asking all spaces which users and groups have permission to it, and which group members each group has.
         """
 
-        from fuzzywuzzy import fuzz
+        from thefuzz import fuzz
+    #pdb.set_trace()
 
         # get a list of all spaces
         spaces = self.get_spaces(expand="permissions")
@@ -678,6 +898,11 @@ class Confluence_cloud_api:
 
 
 
+    def get_user_properties(self, user_id, limit=1000, expand=None, paginate=True):
+        """
+        Returns a user's properties
+        """
+        return self.get(f"{self.baseurl}/wiki/rest/api/user/{user_id}/property", expand=expand, paginate=paginate)[:limit]
 
 
 

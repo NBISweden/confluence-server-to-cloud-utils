@@ -40,10 +40,18 @@ confluence = Confluence_server_api(config)
 spaces = confluence.get_spaces()
 
 # while testing, only rename the test space
-spaces = [ space for space in spaces if space['key'] == 'DAH' ]
+# spaces = [ space for space in spaces if space['key'] == 'DAH' ]
 
 # rename all spaces in list
 for i,space in enumerate(spaces):
+
+    # skip special spaces
+    space_filter_list = [
+                        ]
+    if space['name'] in space_filter_list:
+        print(f"Skipping {space['name']} due to space filter list.")
+        continue
+
     print(f"Renaming {i+1}/{len(spaces)}:\t{space['name']} -> {prefix}{space['name']}")
     response = confluence.update_space_name(space['key'], f"{prefix}{space['name']}")
     #pdb.set_trace()
