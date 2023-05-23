@@ -49,7 +49,7 @@ spaces = confluence.get_spaces()
 users = confluence.get_users()
 normalized_usernames = [ name_processor(user['user']['displayName']) for user in users ]
 
-pdb.set_trace()
+#pdb.set_trace()
 
 # rename all spaces in list
 c = 0

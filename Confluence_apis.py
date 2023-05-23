@@ -288,7 +288,7 @@ class Confluence_server_api:
         logging.info("Parsing permissions.")
         for space in spaces:
 
-            pdb.set_trace()
+            #pdb.set_trace()
             
             logging.debug(f"Space: {space['name']}")
         
