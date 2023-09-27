@@ -26,7 +26,8 @@ with open(input_filename, 'r') as file:
 
         # save the link
         link_dict[parts[0]] = parts[1]
-        link_dict[parts[2]] = parts[3]
+        link_dict[parts[2]] = parts[1]  # map old short link to new full link
+#        link_dict[parts[2]] = parts[3] # map old short link to new short link
 
 
 

@@ -471,7 +471,7 @@ class Confluence_cloud_api:
 
 
 
-    def get(self, url, params=None, expand=None, paginate=True):
+    def get(self, url, params=None, data=None, expand=None, paginate=True):
         """
         Wrapper function to make API calls that will keep sending subsequent requests if the answer is paginated.
         """
@@ -499,13 +499,17 @@ class Confluence_cloud_api:
 
         # define url and send request
         logging.debug(f"Fetching URL: {request_url}")
-        
+
         # fetch results
-        response = requests.request( "GET", request_url, headers=self.headers, auth=self.auth ).json()
+        response = requests.request( "GET", 
+                                     request_url, 
+                                     headers=self.headers, 
+                                     params=data,
+                                     auth=self.auth, 
+                                     ).json()
 
         # check if confluence limited the number of hits, seems to do that if you ask for expansions, setting it to 50
-        #pdb.set_trace()
-        if response['results'] and paginate:
+        if response.get('results') and paginate:
 
             logging.debug(f"Possible API pagination detected, continuing sending more requests.")
 
@@ -531,6 +535,7 @@ class Confluence_cloud_api:
                 response = requests.request("GET",
                                             f"{request_url}{argument_glue}start={ len(results) + 1 }", 
                                             headers=self.headers,
+                                            params=data,
                                             auth=self.auth,
                                             ).json()
 
@@ -544,7 +549,11 @@ class Confluence_cloud_api:
 
         else:
             # got them all in the first request
-            results = response['results']
+            results = response.get('results')
+
+            # if there is no results key, return whole response object
+            if not results:
+                return response
 
         # return
         return results
@@ -577,11 +586,50 @@ class Confluence_cloud_api:
         return self.get(f"{self.baseurl}/wiki/rest/api/space", expand=expand, paginate=paginate)[:limit]
 
 
-    def get_users(self, limit=10000, expand=None, paginate=True):
+    def get_search_users(self, limit=10000, expand=None, paginate=True):
         """
-        Returns a list of users, limited in number by {limit}.
+        Returns a list of all Confluence users (not guests), limited in number by {limit}.
         """
         return self.get(f"{self.baseurl}/wiki/rest/api/search/user", params={"cql":"type=user"}, expand=expand, paginate=paginate)[:limit]
+
+
+    def get_users(self, limit=999999, expand=None, paginate=True):
+        """
+        Returns a list of all Confluence users, limited in number by {limit}.
+        """
+        # fetch all search users and groups
+        search_users   = self.get_search_users() # will not return guests, based on the search for entities tagged as users
+        groups         = self.get_groups()
+
+        # get users that are member of the guest group
+        guest_group_id = [group['id'] for group in groups if group['name'].startswith('confluence-guests-')][0]
+        guest_users    = self.get_group_members(guest_group_id, limit=999999)
+
+        # get users that are member of the guest group
+        ordinary_user_group_id = [group['id'] for group in groups if group['name'].startswith('confluence-users')][0]
+        ordinary_users         = self.get_group_members(ordinary_user_group_id, limit=999999)
+
+        # merge lists
+        merged_users = {}
+        for possible_users in [search_users, guest_users, ordinary_users]:
+            for user in possible_users:
+                try:
+                    # serach users are structured like this
+                    merged_users[user['user']['accountId']] = user['user']
+                except:
+                    # group membership users are structured like this
+                    merged_users[user['accountId']] = user
+
+        # return as a list of users
+        return [user for user in merged_users.values()][:limit]
+
+
+
+    def get_user(self, user_id, expand=None, paginate=True):
+        """
+        Returns info about a user.
+        """
+        return self.get(f"{self.baseurl}/wiki/rest/api/user", data={"accountId":user_id}, expand=expand, paginate=paginate)
 
 
     def get_groups(self, limit=1000, expand=None, paginate=True):
@@ -903,6 +951,163 @@ class Confluence_cloud_api:
         Returns a user's properties
         """
         return self.get(f"{self.baseurl}/wiki/rest/api/user/{user_id}/property", expand=expand, paginate=paginate)[:limit]
+
+
+
+    def add_permission_to_space(self, space_key, entity_type, entity_id, target, operation):
+        """
+        Adds the permission to {operation} to content type {target} for entity of type {entity_type} with id {entity_id} in space {space_key}
+        """
+        # define url and payload
+        url     = f"{self.baseurl}/wiki/rest/api/space/{space_key}/permission"
+        payload = json.dumps({
+                                'subject'  : {
+                                                'type'      : entity_type,
+                                                'identifier': entity_id
+                                             },
+                                'operation': {
+                                                'key'   : operation,
+                                                'target': target,
+                                             }
+                            })
+
+        return self.post(url, data=payload)
+
+
+
+
+
+
+
+
+
+
+
+class Jira_cloud_api:
+    """
+    Class to interact with the Jira Cloud API.
+    """
+
+    # create a object from a config file
+    def __init__(self, config):
+
+        self.user       = config['user']
+        self.api_token  = config['api_token']
+        self.baseurl    = config['url']
+        self.auth       = HTTPBasicAuth(self.user, self.api_token)
+        self.headers    = {
+                            "Accept": "application/json",
+                            "Content-Type": "application/json",
+                          }
+
+
+
+
+
+    def get(self, url, params=None, expand=None, paginate=True):
+        """
+        Wrapper function to make API calls that will keep sending subsequent requests if the answer is paginated.
+        """
+
+        #pdb.set_trace()
+        # init
+        url_parameters = []
+
+        # if there is anything to expand
+        if expand:
+            url_parameters.append(f"expand={expand}")
+
+        # if there is a parameter dict
+        if params:
+            for key,val in params.items():
+                url_parameters.append(f"{str(key)}={str(val)}")
+
+        # check if a parameter separator (?) should be inserted in the url
+        if url_parameters:
+            url_parameters = f"?{'&'.join(url_parameters)}"
+            request_url = f"{url}{url_parameters}"
+        else:
+            request_url = url
+
+
+        # define url and send request
+        logging.debug(f"Fetching URL: {request_url}")
+        
+        # fetch results
+        response = requests.request( "GET", request_url, headers=self.headers, auth=self.auth ).json()
+
+        # check if confluence limited the number of hits, seems to do that if you ask for expansions, setting it to 50
+        #pdb.set_trace()
+        if response['results'] and paginate:
+
+            logging.debug(f"Possible API pagination detected, continuing sending more requests.")
+
+            # save inital response
+            results = response['results']
+
+            # loop until all hits are collected
+            i = 1
+            while response['results']:
+
+                # check if ? if already in the url
+                last_url_part = request_url.split('/')[-1]
+                if '?' in last_url_part:
+                    # add a & if there already is an url argument there
+                    argument_glue = '&'
+                else:
+                    # add it if it's not there already
+                    argument_glue = '?'
+
+
+                logging.debug(f"Fetching URL: {request_url}{argument_glue}start={ len(results) + 1 }")
+                # ask for a new batch of results
+                response = requests.request("GET",
+                                            f"{request_url}{argument_glue}start={ len(results) + 1 }", 
+                                            headers=self.headers,
+                                            auth=self.auth,
+                                            ).json()
+
+                # save the new batch together with the previous ones
+                results += response['results']
+
+                # increase counteults = response['results']
+                i+=1
+            
+            logging.debug(f"API pagination finished, {i} pages fetched.")
+
+        else:
+            # got them all in the first request
+            results = response['results']
+
+        # return
+        return results
+
+
+    def post(self, url, data=None, params=None):
+        """
+        Wrapper function to post data to the API.
+        """
+        #pdb.set_trace()
+        return requests.request("POST", url, data=data, headers=self.headers, params=params, auth=self.auth,)
+
+
+
+    def delete(self, url, data=None, params=None):
+        """
+        Wrapper function to delete data to the API.
+        """
+        #pdb.set_trace()
+        return requests.request("DELETE", url, data=data, headers=self.headers, params=params, auth=self.auth,)
+
+
+
+    def get_users(self, limit=10000, expand=None, paginate=True):
+        """
+        Returns a list of users, limited in number by {limit}.
+        """
+        return self.get(f"{self.baseurl}/jira/rest/api/3/users/search", expand=expand, paginate=paginate)[:limit]
+
+
 
 
 

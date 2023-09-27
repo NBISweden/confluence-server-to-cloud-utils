@@ -40,12 +40,12 @@ with open(atlassian_config_filename, 'r') as file:
 # create confluence api instance
 c = Confluence_cloud_api(config)
 
-group_name = 'confluence-users'
-group_users = c.get_group_members(group_name)
-
-# write all groups users to file
-with open(f'{group_name}.members.tsv', 'w', encoding='utf-8') as group_file:
-    for user in group_users:
-        group_file.write(f'{user["username"]}\t{user["displayName"]}\n')
-
-#pdb.set_trace()
+# group_name = 'confluence-users'
+# group_users = c.get_group_members(group_name)
+# 
+# # write all groups users to file
+# with open(f'{group_name}.members.tsv', 'w', encoding='utf-8') as group_file:
+#     for user in group_users:
+#         group_file.write(f'{user["username"]}\t{user["displayName"]}\n')
+pprint(c.get_user('633c0346140ba0bf651d54e7'))
+pdb.set_trace()
