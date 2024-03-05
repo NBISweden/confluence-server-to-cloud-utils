@@ -4,7 +4,7 @@ import json
 import pdb
 import logging
 import re
-
+from pprint import pprint
 
 
 
@@ -643,7 +643,10 @@ class Confluence_cloud_api:
         """
         Returns a list of groups members of group {group_id}, limited in number by {limit}.
         """
-        return self.get(f"{self.baseurl}/wiki/rest/api/group/{group_id}/membersByGroupId", expand=expand, paginate=paginate)[:limit]
+        try:
+            return self.get(f"{self.baseurl}/wiki/rest/api/group/{group_id}/membersByGroupId", expand=expand, paginate=paginate)[:limit]
+        except TypeError:
+            return []
 
 
     def convert_to_guest_user(self, user_id, guest_group_id, remove_other_groups=False):
@@ -768,11 +771,16 @@ class Confluence_cloud_api:
 
 
 
-    def find_possible_guest_users(self, n_spaces=1, ignore_personal_spaces=False, ignore_unlicenced=True, ignore_deleted=True):
+    def find_possible_guest_users(self, n_spaces=1, ignore_personal_spaces=False, ignore_unlicenced=True, ignore_deleted=True, guest_group_name='confluence-guests-scilifelab', skip_guest_users=True, require_confluence_access=True):
         """
         Find all users that are members of maximum {n_spaces} spaces.
-        If {ignore_personal_spaces} is True it will not count the personal space (a space with same name as username) to wards this number.
+        If {ignore_personal_spaces} is True it will not count the personal space (a space with same name as username) towards this number.
         Will only check if a user is mentioned in a space's permissions, not what permissions they actually have.
+        ignore_unlicenced will filter out users with 'Unlicensed' in their name.
+        ignore_deleted will filter out users with 'Deleted' in their name.
+        guest_group_name is the name of the group that is considered the guest group.
+        skip_guest_users will ignore users who are already members of the guest group.
+        require_confluence_access will filter out users who are not members of the confluence-users group.
 
         A huge function since there is no way to ask Confluence about what permissions a user has. You have to reconstruct the permissions
         by asking all spaces which users and groups have permission to it, and which group members each group has.
@@ -782,6 +790,7 @@ class Confluence_cloud_api:
     #pdb.set_trace()
 
         # get a list of all spaces
+        logging.info("Fetching all spaces from API.")
         spaces = self.get_spaces(expand="permissions")
         
         # init
@@ -845,11 +854,11 @@ class Confluence_cloud_api:
         for user in users:
 
             # find missing users
-            if user['user']['accountId'] not in user_permissions:
+            if user['accountId'] not in user_permissions:
 
                 # initiate entry
                 logging.debug(f"Missing user: {user}")
-                user_permissions[user['user']['accountId']] = {'spaces':{}, 'user':user['user']}
+                user_permissions[user['accountId']] = {'spaces':{}, 'user':user}
 
 
         # get all groups
@@ -881,6 +890,12 @@ class Confluence_cloud_api:
                 # add group spaces to user spaces
                 user_permissions[member['accountId']]['spaces'].update(group_permissions[group['id']]['spaces'])
 
+            # save the guest group members for later
+            if group['name'] == guest_group_name:
+                guest_users = { member['accountId']:member for member in members }
+
+            elif group['name'] == 'confluence-users':
+                ordinary_users = { member['accountId']:member for member in members }
 
 
         # make a lookup table for space keys to space names for easy access
@@ -903,12 +918,15 @@ class Confluence_cloud_api:
             if ignore_deleted and 'Deleted' in user_perm['user']['displayName']:
                 continue
 
+            # filter out users who are not members of the confluence-users group
+            if require_confluence_access and user_id not in ordinary_users:
+                continue
 
             # count user towards total
             total_users += 1
 
             # get the name of the space a user has access to
-            user_space_names = None
+            user_spaces = {}
             if len(user_permissions[user_id]['spaces']) > 0:
                 user_spaces = user_permissions[user_id]['spaces'].copy()
 
@@ -921,13 +939,16 @@ class Confluence_cloud_api:
                 for user_space_key, user_space in user_permissions[user_id]['spaces'].items():
 
                     # if the space name is too similar, delete it
-                    if fuzz.ratio(name_processor(user_perm['user']['displayName']), name_processor(user_space['name'])) >= 75:
+                    if fuzz.ratio(name_processor(user_perm['user']['publicName']), name_processor(user_space['name'])) >= 75:
                         del user_spaces[user_space_key]
 
 
+            # check if users who are members of the guest group should be skipped
+            if skip_guest_users and user_id in guest_users:
+                continue
 
             # check if the user is a member in few enough spaces to be eligible to be selected
-            if len(user_spaces) <= n_spaces:
+            if len(user_spaces) <= n_spaces: 
 
                 # count number of found users
                 found_users += 1
@@ -937,6 +958,7 @@ class Confluence_cloud_api:
 
                 # save the user in the keep list
                 possible_guests[user_id] = {'user':user_perm['user'], 'spaces':user_perm['spaces']}
+
 
 
         logging.debug(f"Found {found_users} users out of {total_users} total users that are members of {n_spaces} or less spaces.")

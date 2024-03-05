@@ -4,3 +4,4 @@ __pycache__
 *.tsv
 *.txt
 *.csv
+venv/

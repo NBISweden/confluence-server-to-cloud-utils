@@ -8,7 +8,7 @@ import pdb
 from pprint import pprint
 from Confluence_apis import Confluence_cloud_api
 import logging
-from fuzzywuzzy import fuzz
+from pprint import pprint
 
 # configure logging
 logging.basicConfig(
@@ -55,7 +55,7 @@ logging.debug("Creating confluence api object")
 confluence = Confluence_cloud_api(config)
 
 # get list of possible guest users
-possible_guest_user = confluence.find_possible_guest_users(n_spaces = space_membership_cutoff, ignore_personal_spaces = False)
+possible_guest_user = confluence.find_possible_guest_users(n_spaces = space_membership_cutoff, ignore_personal_spaces = True)
 
 # list of system users not to convert, created by looking at the user names only, could have missed some
 user_filter_list = [
@@ -75,6 +75,7 @@ user_filter_list = [
                     'Slack',
                     'Trello',
                     'Zendesk Support for Jira',
+                    'Atlas for Jira Cloud',
                    ]
 
 found_users = 0
@@ -83,6 +84,9 @@ for user_id, user_perm in possible_guest_user.items():
 
     # skip users that are to be filtered out
     if user_perm['user']['displayName'] in user_filter_list:
+        continue
+    # skip app users
+    if user_perm['user']['accountType'] == 'app':
         continue
 
     # increase the counter
@@ -99,8 +103,7 @@ for user_id, user_perm in possible_guest_user.items():
     # get names of spaces the user has access to
 
     # print user entry
-    #pdb.set_trace()
-    print(f"{user_perm['user'].get('displayName')}\t{user_perm['user'].get('email')}\t{','.join([ space['name'] for space in user_perm['spaces'].values() ])}")
+    print(f"{user_perm['user'].get('displayName')}\t{len(user_perm['spaces'])}\t{','.join([ space['name'] for space in user_perm['spaces'].values() ])}")
 
 
 logging.info(f"Found {found_users} users that are members of {space_membership_cutoff} or less spaces.")
