@@ -771,9 +771,9 @@ class Confluence_cloud_api:
 
 
 
-    def find_possible_guest_users(self, n_spaces=1, ignore_personal_spaces=False, ignore_unlicenced=True, ignore_deleted=True, guest_group_name='confluence-guests-scilifelab', skip_guest_users=True, require_confluence_access=True):
+    def find_possible_guest_users(self, n_spaces_cutoff=-1, ignore_personal_spaces=False, ignore_unlicenced=True, ignore_deleted=True, guest_group_name='confluence-guests-scilifelab', skip_guest_users=True, require_confluence_access=True):
         """
-        Find all users that are members of maximum {n_spaces} spaces.
+        Find all users that are members of maximum {n_spaces_cutoff} spaces. If negative, all users will be returned.
         If {ignore_personal_spaces} is True it will not count the personal space (a space with same name as username) towards this number.
         Will only check if a user is mentioned in a space's permissions, not what permissions they actually have.
         ignore_unlicenced will filter out users with 'Unlicensed' in their name.
@@ -902,11 +902,11 @@ class Confluence_cloud_api:
         key_to_name = { space['key']:space['name'] for space in spaces}
 
         # init
-        logging.debug(f"Findinig users with {n_spaces} or less spaces.")
+        logging.debug(f"Findinig users with {n_spaces_cutoff} or less spaces.")
         total_users = 0
         found_users = 0
 
-        # find users with access to only n_spaces spaces
+        # find users with access to only n_spaces_cutoff spaces
         possible_guests = {}
         for user_id,user_perm in user_permissions.items():
 
@@ -927,8 +927,8 @@ class Confluence_cloud_api:
 
             # get the name of the space a user has access to
             user_spaces = {}
-            if len(user_permissions[user_id]['spaces']) > 0:
-                user_spaces = user_permissions[user_id]['spaces'].copy()
+            if len(user_perm['spaces']) > 0:
+                user_spaces = user_perm['spaces'].copy()
 
 
 
@@ -936,32 +936,37 @@ class Confluence_cloud_api:
             if ignore_personal_spaces:
 
                 # go through the names of all spaces the user is a member of
-                for user_space_key, user_space in user_permissions[user_id]['spaces'].items():
+                for user_space_key, user_space in user_perm['spaces'].items():
 
-                    # if the space name is too similar, delete it
-                    if fuzz.ratio(name_processor(user_perm['user']['publicName']), name_processor(user_space['name'])) >= 75:
+                    # if it is a personal space and the space name is too similar, delete it
+                    if user_space['type'] == 'personal' and fuzz.ratio(name_processor(user_perm['user']['publicName']), name_processor(user_space['name'])) >= 75:
                         del user_spaces[user_space_key]
 
 
             # check if users who are members of the guest group should be skipped
+            user_class = 'ordinary'
             if skip_guest_users and user_id in guest_users:
                 continue
+            # check if the user is a guest
+            elif user_id in guest_users:
+                user_class = 'guest'
 
-            # check if the user is a member in few enough spaces to be eligible to be selected
-            if len(user_spaces) <= n_spaces: 
+            # check if the user is a member in too many spaces to be eligible to be selected
+            if n_spaces_cutoff >= 0 and len(user_spaces) > n_spaces_cutoff: 
+                continue
+            
+            # count number of found users
+            found_users += 1
 
-                # count number of found users
-                found_users += 1
+            # print user entry
+            logging.debug(f"{user_perm['user'].get('displayName', None)}\t{user_class}\t{len(user_spaces)}\t{','.join(user_spaces.keys())}")
 
-                # print user entry
-                logging.debug(f"{user_perm['user'].get('displayName', None)}\t{user_perm['user'].get('email', None)}\t{','.join(user_spaces.keys())}")
-
-                # save the user in the keep list
-                possible_guests[user_id] = {'user':user_perm['user'], 'spaces':user_perm['spaces']}
+            # save the user in the keep list
+            possible_guests[user_id] = {'user':user_perm['user'], 'spaces':user_perm['spaces'], 'n_spaces':len(user_spaces), 'class':user_class}
 
 
 
-        logging.debug(f"Found {found_users} users out of {total_users} total users that are members of {n_spaces} or less spaces.")
+        logging.debug(f"Found {found_users} users out of {total_users} total users that are members of {n_spaces_cutoff} or less spaces.")
         return possible_guests
 
 

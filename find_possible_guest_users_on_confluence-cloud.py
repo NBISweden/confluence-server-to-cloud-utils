@@ -39,7 +39,7 @@ try:
     logging.debug("Fetching space membership cutoff")
     space_membership_cutoff = int(sys.argv[2])
 except IndexError:
-    space_membership_cutoff = 1
+    space_membership_cutoff = -1
 
 # read the atlassian config file
 logging.debug("Reading config file.")
@@ -55,7 +55,7 @@ logging.debug("Creating confluence api object")
 confluence = Confluence_cloud_api(config)
 
 # get list of possible guest users
-possible_guest_user = confluence.find_possible_guest_users(n_spaces = space_membership_cutoff, ignore_personal_spaces = True)
+possible_guest_user = confluence.find_possible_guest_users(n_spaces_cutoff = space_membership_cutoff, ignore_personal_spaces = True)
 
 # list of system users not to convert, created by looking at the user names only, could have missed some
 user_filter_list = [
@@ -79,7 +79,7 @@ user_filter_list = [
                    ]
 
 found_users = 0
-for user_id, user_perm in possible_guest_user.items():
+for user_id, user_perm in sorted(possible_guest_user.items(), key=lambda x: x[1]['n_spaces']):
 
 
     # skip users that are to be filtered out
@@ -103,7 +103,7 @@ for user_id, user_perm in possible_guest_user.items():
     # get names of spaces the user has access to
 
     # print user entry
-    print(f"{user_perm['user'].get('displayName')}\t{len(user_perm['spaces'])}\t{','.join([ space['name'] for space in user_perm['spaces'].values() ])}")
+    print(f"{user_perm['user'].get('displayName')}\t{user_perm['class']}\t{user_perm['n_spaces']}\t{','.join([ space['name'] for space in user_perm['spaces'].values() ])}")
 
 
 logging.info(f"Found {found_users} users that are members of {space_membership_cutoff} or less spaces.")
