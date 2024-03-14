@@ -771,7 +771,7 @@ class Confluence_cloud_api:
 
 
 
-    def find_possible_guest_users(self, n_spaces_cutoff=-1, ignore_personal_spaces=False, ignore_unlicenced=True, ignore_deleted=True, guest_group_name='confluence-guests-scilifelab', skip_guest_users=True, require_confluence_access=True):
+    def find_possible_guest_users(self, n_spaces_cutoff=-1, ignore_personal_spaces=True, ignore_unlicenced=True, ignore_deleted=True, guest_group_name='confluence-guests-scilifelab', skip_guest_users=True, require_confluence_access=True):
         """
         Find all users that are members of maximum {n_spaces_cutoff} spaces. If negative, all users will be returned.
         If {ignore_personal_spaces} is True it will not count the personal space (a space with same name as username) towards this number.
@@ -801,6 +801,15 @@ class Confluence_cloud_api:
         # go through all spaces
         logging.info("Parsing permissions.")
         for space in spaces:
+
+            # skip archived spaces
+            if space['status'] == 'archived':
+                continue
+
+            # skip personal spaces
+            if ignore_personal_spaces:
+                if space['type'] == 'personal':
+                    continue
             
             logging.debug(f"Space: {space['name']}")
         
